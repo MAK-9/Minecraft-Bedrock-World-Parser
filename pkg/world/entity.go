@@ -147,6 +147,9 @@ func readAnyNBTValue(r *bytes.Reader, tagType byte) (interface{}, error) {
 		if err != nil {
 			return nil, err
 		}
+		if n < 0 || int(n) > r.Len() {
+			return nil, fmt.Errorf("byte array length %d exceeds remaining %d bytes", n, r.Len())
+		}
 		buf := make([]byte, n)
 		_, err = r.Read(buf)
 		return buf, err
@@ -160,6 +163,9 @@ func readAnyNBTValue(r *bytes.Reader, tagType byte) (interface{}, error) {
 		count, err := readInt32LE(r)
 		if err != nil {
 			return nil, err
+		}
+		if count < 0 || int(count) > r.Len() {
+			return nil, fmt.Errorf("list count %d exceeds remaining %d bytes", count, r.Len())
 		}
 		list := make([]interface{}, count)
 		for i := int32(0); i < count; i++ {
@@ -177,6 +183,9 @@ func readAnyNBTValue(r *bytes.Reader, tagType byte) (interface{}, error) {
 		if err != nil {
 			return nil, err
 		}
+		if n < 0 || int(n)*4 > r.Len() {
+			return nil, fmt.Errorf("int array length %d exceeds remaining %d bytes", n, r.Len())
+		}
 		arr := make([]int32, n)
 		for i := int32(0); i < n; i++ {
 			v, err := readInt32LE(r)
@@ -190,6 +199,9 @@ func readAnyNBTValue(r *bytes.Reader, tagType byte) (interface{}, error) {
 		n, err := readInt32LE(r)
 		if err != nil {
 			return nil, err
+		}
+		if n < 0 || int(n)*8 > r.Len() {
+			return nil, fmt.Errorf("long array length %d exceeds remaining %d bytes", n, r.Len())
 		}
 		arr := make([]int64, n)
 		for i := int32(0); i < n; i++ {

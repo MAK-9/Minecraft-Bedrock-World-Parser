@@ -53,8 +53,13 @@ func (wr *WorldReader) Close() error {
 // IterateChunks calls fn for every chunk in the given dimension.
 // Pass dim == -1 to iterate all dimensions.
 // Errors from fn stop iteration and are returned.
+//
+// Chunks are processed in a streaming fashion: LevelDB returns keys in sorted
+// order, so all keys belonging to one chunk coordinate (x, z, dimension) are
+// contiguous. We accumulate a single chunk at a time and flush it to fn as soon
+// as the coordinate changes, keeping memory usage bounded to one chunk rather
+// than the whole world.
 func (wr *WorldReader) IterateChunks(dim int, fn func(ChunkData) error) error {
-	// First pass: collect all subchunks, Data2D, block entities, entities per chunk coord.
 	type chunkAccumulator struct {
 		subChunks     map[int8]*SubChunk
 		data2D        *Data2D
@@ -62,16 +67,39 @@ func (wr *WorldReader) IterateChunks(dim int, fn func(ChunkData) error) error {
 		entities      []Entity
 	}
 
-	// key: (x, z, dimension)
 	type coord struct {
 		X, Z      int32
 		Dimension Dimension
 	}
 
-	chunks := make(map[coord]*chunkAccumulator)
-
 	iter := wr.db.NewIterator(nil, nil)
 	defer iter.Release()
+
+	var (
+		curCoord coord
+		curAcc   *chunkAccumulator
+		haveCur  bool
+	)
+
+	flush := func() error {
+		if !haveCur || curAcc == nil {
+			return nil
+		}
+		cd := ChunkData{
+			Key: ChunkKey{
+				X:         curCoord.X,
+				Z:         curCoord.Z,
+				Dimension: curCoord.Dimension,
+			},
+			SubChunks:     curAcc.subChunks,
+			Data2D:        curAcc.data2D,
+			BlockEntities: curAcc.blockEntities,
+			Entities:      curAcc.entities,
+		}
+		err := fn(cd)
+		curAcc = nil // release for GC
+		return err
+	}
 
 	for iter.Next() {
 		rawKey := iter.Key()
@@ -84,10 +112,13 @@ func (wr *WorldReader) IterateChunks(dim int, fn func(ChunkData) error) error {
 		}
 
 		c := coord{X: ck.X, Z: ck.Z, Dimension: ck.Dimension}
-		acc := chunks[c]
-		if acc == nil {
-			acc = &chunkAccumulator{subChunks: make(map[int8]*SubChunk)}
-			chunks[c] = acc
+		if !haveCur || c != curCoord {
+			if err := flush(); err != nil {
+				return err
+			}
+			curCoord = c
+			curAcc = &chunkAccumulator{subChunks: make(map[int8]*SubChunk)}
+			haveCur = true
 		}
 
 		val := iter.Value()
@@ -96,31 +127,30 @@ func (wr *WorldReader) IterateChunks(dim int, fn func(ChunkData) error) error {
 		case TagSubChunk:
 			sc, err := ParseSubChunk(val)
 			if err != nil {
-				// Non-fatal: log and skip
-				continue
+				continue // non-fatal: skip undecodable subchunk
 			}
-			acc.subChunks[ck.SubY] = sc
+			curAcc.subChunks[ck.SubY] = sc
 
 		case TagData2D:
 			d2d, err := ParseData2D(val)
 			if err != nil {
 				continue
 			}
-			acc.data2D = d2d
+			curAcc.data2D = d2d
 
 		case TagBlockEntity:
 			bes, err := ParseBlockEntities(val)
 			if err != nil {
 				continue
 			}
-			acc.blockEntities = append(acc.blockEntities, bes...)
+			curAcc.blockEntities = append(curAcc.blockEntities, bes...)
 
 		case TagEntity:
 			ents, err := ParseEntities(val)
 			if err != nil {
 				continue
 			}
-			acc.entities = append(acc.entities, ents...)
+			curAcc.entities = append(curAcc.entities, ents...)
 		}
 	}
 
@@ -128,24 +158,8 @@ func (wr *WorldReader) IterateChunks(dim int, fn func(ChunkData) error) error {
 		return fmt.Errorf("LevelDB iteration error: %w", err)
 	}
 
-	// Second pass: invoke callback for each chunk.
-	for c, acc := range chunks {
-		cd := ChunkData{
-			Key: ChunkKey{
-				X:         c.X,
-				Z:         c.Z,
-				Dimension: c.Dimension,
-			},
-			SubChunks:     acc.subChunks,
-			Data2D:        acc.data2D,
-			BlockEntities: acc.blockEntities,
-			Entities:      acc.entities,
-		}
-		if err := fn(cd); err != nil {
-			return err
-		}
-	}
-	return nil
+	// Flush the final chunk.
+	return flush()
 }
 
 // SurfaceBlock holds a single surface block result from FindSurfaceBlocks.

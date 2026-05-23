@@ -106,7 +106,7 @@ func runParse(worldPath string, f *parseFlags) error {
 		return fmt.Errorf("writing world info: %w", err)
 	}
 
-	exporter, err := export.NewChunkExporter(db)
+	exporter, err := export.NewChunkExporter(db, f.surfaceOnly)
 	if err != nil {
 		return fmt.Errorf("creating exporter: %w", err)
 	}

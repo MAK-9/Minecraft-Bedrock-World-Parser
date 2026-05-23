@@ -129,11 +129,12 @@ func WriteWorldInfo(db *sql.DB, info *world.WorldInfo) error {
 
 // ChunkExporter exports chunk data to SQLite using a long-lived transaction for performance.
 type ChunkExporter struct {
-	db      *sql.DB
-	tx      *sql.Tx
-	stmts   *exportStmts
-	count   int
-	batchSz int
+	db          *sql.DB
+	tx          *sql.Tx
+	stmts       *exportStmts
+	count       int
+	batchSz     int
+	surfaceOnly bool
 }
 
 type exportStmts struct {
@@ -145,8 +146,10 @@ type exportStmts struct {
 }
 
 // NewChunkExporter creates a ChunkExporter that batches inserts for performance.
-func NewChunkExporter(db *sql.DB) (*ChunkExporter, error) {
-	ce := &ChunkExporter{db: db, batchSz: 500}
+// When surfaceOnly is true, only surface_blocks and biomes are written; entities
+// and block entities are skipped.
+func NewChunkExporter(db *sql.DB, surfaceOnly bool) (*ChunkExporter, error) {
+	ce := &ChunkExporter{db: db, batchSz: 500, surfaceOnly: surfaceOnly}
 	if err := ce.beginBatch(); err != nil {
 		return nil, err
 	}
@@ -224,17 +227,19 @@ func (ce *ChunkExporter) ExportChunk(cd world.ChunkData) error {
 		}
 	}
 
-	// Block entities
-	for _, be := range cd.BlockEntities {
-		if _, err := ce.stmts.blockEntity.Exec(dim, be.X, be.Y, be.Z, be.Type, be.RawJSON()); err != nil {
-			return fmt.Errorf("inserting block entity: %w", err)
+	if !ce.surfaceOnly {
+		// Block entities
+		for _, be := range cd.BlockEntities {
+			if _, err := ce.stmts.blockEntity.Exec(dim, be.X, be.Y, be.Z, be.Type, be.RawJSON()); err != nil {
+				return fmt.Errorf("inserting block entity: %w", err)
+			}
 		}
-	}
 
-	// Entities
-	for _, e := range cd.Entities {
-		if _, err := ce.stmts.entity.Exec(dim, cx, cz, e.X, e.Y, e.Z, e.Type, e.RawJSON()); err != nil {
-			return fmt.Errorf("inserting entity: %w", err)
+		// Entities
+		for _, e := range cd.Entities {
+			if _, err := ce.stmts.entity.Exec(dim, cx, cz, e.X, e.Y, e.Z, e.Type, e.RawJSON()); err != nil {
+				return fmt.Errorf("inserting entity: %w", err)
+			}
 		}
 	}
 

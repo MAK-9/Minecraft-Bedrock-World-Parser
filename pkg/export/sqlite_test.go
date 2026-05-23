@@ -48,7 +48,7 @@ func TestExport_Integration(t *testing.T) {
 		t.Fatalf("WriteWorldInfo: %v", err)
 	}
 
-	exporter, err := export.NewChunkExporter(db)
+	exporter, err := export.NewChunkExporter(db, false)
 	if err != nil {
 		t.Fatalf("NewChunkExporter: %v", err)
 	}
