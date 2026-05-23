@@ -1,21 +1,21 @@
 # Minecraft Bedrock World Parser
 
-Parser światów Minecraft Bedrock Edition jako krok pośredni w pipeline:
+An intermediate step in the world-to-map pipeline:
 
 ```
-świat Bedrock  →  minecraft-bedrock-parser  →  SQLite  →  dynamiczna mapa
+Bedrock world  →  minecraft-bedrock-parser  →  SQLite  →  dynamic map
 ```
 
-Odczytuje pliki świata z natywnego formatu LevelDB i zapisuje dane do bazy SQLite zoptymalizowanej pod ładowanie widocznych chunków przez dynamiczną mapę (viewport-based loading).
+Reads a Minecraft Bedrock Edition world from its native LevelDB format and writes the data into a SQLite database optimised for viewport-based loading by a dynamic map renderer.
 
 ---
 
-## Wymagania
+## Requirements
 
 - Go 1.22+
-- Świat Minecraft Bedrock Edition (PC/Android/iOS backup)
+- A Minecraft Bedrock Edition world directory
 
-## Instalacja
+## Build
 
 ```bash
 git clone https://github.com/MAK-9/Minecraft-Bedrock-World-Parser
@@ -25,51 +25,51 @@ go build -o minecraft-bedrock-parser ./cmd/parser
 
 ---
 
-## Użycie
+## Usage
 
-### Parsowanie świata
+### Parse a world
 
 ```bash
-minecraft-bedrock-parser parse <ścieżka-do-świata> [flagi]
+minecraft-bedrock-parser parse <world-path> [flags]
 ```
 
-Przykłady:
+Examples:
 
 ```bash
-# Parsowanie całego świata do pliku world.db
+# Parse the entire world into world.db
 minecraft-bedrock-parser parse ./MyWorld
 
-# Podaj własną nazwę pliku wyjściowego
+# Specify an output file
 minecraft-bedrock-parser parse ./MyWorld -o /var/www/map/world.db
 
-# Tylko powierzchniowe bloki (szybszy tryb, wystarczy dla map 2D)
+# Surface blocks only — faster, enough for a 2D map
 minecraft-bedrock-parser parse ./MyWorld --surface-only -v
 
-# Live serwer — parser kopiuje świat zanim otworzy LevelDB
+# Live server — copy the world before opening LevelDB
 minecraft-bedrock-parser parse ./worlds/MyWorld -o world.db --copy-first
 
-# Tylko Overworld
+# Overworld only
 minecraft-bedrock-parser parse ./MyWorld -d 0
 ```
 
-| Flaga | Opis |
+| Flag | Description |
 |---|---|
-| `-o, --output` | Plik wyjściowy SQLite (domyślnie: `<nazwa-świata>.db`) |
-| `-d, --dimension` | `0`=Overworld, `1`=Nether, `2`=End, `-1`=wszystkie (domyślnie: `-1`) |
-| `--region` | Ogranicz do regionu chunków: `x1,z1,x2,z2` |
-| `--surface-only` | Tylko bloki powierzchniowe (szybszy tryb dla map 2D) |
-| `--copy-first` | Kopiuje świat do katalogu tymczasowego przed otwarciem |
-| `-v, --verbose` | Szczegółowe logi postępu |
+| `-o, --output` | Output SQLite file (default: `<world-name>.db`) |
+| `-d, --dimension` | `0`=Overworld, `1`=Nether, `2`=End, `-1`=all (default: `-1`) |
+| `--region` | Restrict to a chunk region: `x1,z1,x2,z2` |
+| `--surface-only` | Export surface blocks only |
+| `--copy-first` | Copy the world to a temp directory before opening |
+| `-v, --verbose` | Print progress |
 
-### Walidacja świata
+### Verify a world
 
-Przed parsowaniem możesz sprawdzić czy świat jest poprawnie odczytywany:
+Check that the world parses cleanly before writing any output:
 
 ```bash
 minecraft-bedrock-parser verify ./MyWorld
 ```
 
-Wypisuje raport bez zapisywania żadnych plików:
+Prints a diagnostic report without writing any files:
 
 ```
 World:   "MyWorld"
@@ -91,33 +91,33 @@ Sample surface blocks (chunk 0,0 overworld):
   ...
 ```
 
-### Live serwer — aktualizacja co N minut
+### Live server usage
 
-LevelDB używa wyłącznej blokady pliku, więc parser **nie może** bezpośrednio otworzyć świata, który jest aktualnie używany przez serwer. Flaga `--copy-first` rozwiązuje ten problem — parser tworzy kopię świata i otwiera ją, nie dotykając oryginału.
+LevelDB holds an exclusive file lock, so the parser cannot open a world that is currently in use by the server. The `--copy-first` flag solves this: it copies the world to a temporary directory and parses the copy, leaving the original untouched.
 
 ```bash
-# cron lub systemd timer co 5 minut:
+# cron / systemd timer every 5 minutes:
 minecraft-bedrock-parser parse ./worlds/MyWorld -o /var/www/map/world.db --copy-first
 ```
 
 ---
 
-## Schemat SQLite
+## SQLite schema
 
-Baza zawiera pięć tabel zoptymalizowanych do zapytań po koordynatach:
+Five tables, indexed for coordinate-range queries:
 
 ```sql
-world_info       -- metadane: nazwa świata, seed, spawn, tryb gry
-chunks           -- rejestr sparsowanych chunków
-surface_blocks   -- najwyższy niepowietrzny blok na każdej kolumnie XZ
-biomes           -- dane biomów (16×16 per chunk)
-block_entities   -- skrzynie, znaki, piece itp. z pełnymi danymi NBT
-entities         -- moby i inne encje z pełnymi danymi NBT
+world_info       -- level name, seed, spawn point, game mode
+chunks           -- registry of every parsed chunk
+surface_blocks   -- highest non-air block per XZ column
+biomes           -- biome IDs (16x16 per chunk)
+block_entities   -- chests, signs, furnaces, etc. with full NBT as JSON
+entities         -- mobs and other entities with full NBT as JSON
 ```
 
-### Przykładowe zapytania
+### Example queries
 
-Pobierz bloki widoczne w viewporcie mapy (klucz do dynamicznej mapy):
+Fetch blocks visible in a map viewport (the core dynamic-map query):
 
 ```sql
 SELECT x, z, y, block_name, block_states
@@ -127,14 +127,14 @@ WHERE dimension = 0
   AND chunk_z BETWEEN -10 AND 10;
 ```
 
-Znajdź wszystkie skrzynie w Overworld:
+Find all chests in the Overworld:
 
 ```sql
 SELECT x, y, z, data FROM block_entities
 WHERE dimension = 0 AND type = 'Chest';
 ```
 
-Metadane świata:
+World metadata:
 
 ```sql
 SELECT key, value FROM world_info;
@@ -142,70 +142,70 @@ SELECT key, value FROM world_info;
 
 ---
 
-## Lokacja plików świata
+## World directory locations
 
-| Platforma | Ścieżka |
+| Platform | Path |
 |---|---|
 | Windows (Microsoft Store) | `%LocalAppData%\Packages\Microsoft.MinecraftUWP_*\LocalState\games\com.mojang\minecraftWorlds\` |
 | Windows (Preview) | `%LocalAppData%\Packages\Microsoft.MinecraftWindowsBeta_*\LocalState\games\com.mojang\minecraftWorlds\` |
 | Android | `/sdcard/games/com.mojang/minecraftWorlds/` |
-| iOS | Backup przez iTunes / iMazing |
-| Serwer Bedrock (BDS) | `worlds/<nazwa-świata>/` obok `bedrock_server` |
+| iOS | Via iTunes or iMazing backup |
+| Bedrock Dedicated Server | `worlds/<world-name>/` next to `bedrock_server` |
 
 ---
 
-## Struktura projektu
+## Project structure
 
 ```
 ├── cmd/parser/          # CLI (cobra)
 ├── pkg/
-│   ├── world/           # Decodery formatu Bedrock
-│   │   ├── chunk.go     # Parsowanie kluczy LevelDB
-│   │   ├── subchunk.go  # Dekoder SubChunk v8/v9 (bloki + palette NBT)
-│   │   ├── biome.go     # Dekoder biom 2D
-│   │   ├── entity.go    # Dekoder encji i block entities
-│   │   ├── metadata.go  # Parser level.dat
-│   │   └── reader.go    # WorldReader — iteracja chunków
+│   ├── world/           # Bedrock format decoders
+│   │   ├── chunk.go     # LevelDB key parsing
+│   │   ├── subchunk.go  # SubChunk v8/v9 (bit-packed indices + NBT palette)
+│   │   ├── biome.go     # 2D biome decoder
+│   │   ├── entity.go    # Entity and block-entity decoders
+│   │   ├── metadata.go  # level.dat parser
+│   │   └── reader.go    # WorldReader — chunk iteration
 │   └── export/
-│       └── sqlite.go    # Eksport do SQLite
+│       └── sqlite.go    # SQLite exporter
 ├── testdata/
-│   ├── generate_fixtures.go  # Generator minimalnego świata testowego
-│   └── fixtures/             # Binarne fixtures do testów integracyjnych
+│   ├── generate_fixtures.go  # Generates a minimal test world
+│   └── fixtures/             # Binary fixtures for integration tests
 └── scripts/
-    └── test.sh          # Lokalny runner testów
+    └── test.sh          # Local test runner
 ```
 
 ---
 
-## Testy
+## Testing
 
 ```bash
-# Wygeneruj fixtures testowe (jednorazowo)
+# Generate test fixtures (one-time)
 go run testdata/generate_fixtures.go
 
-# Uruchom wszystkie testy
+# Run all tests
 go test ./... -v
 
-# Lub użyj skryptu (fixtures + testy + vet)
+# Or use the helper script (fixtures + tests + vet)
 ./scripts/test.sh
 ```
 
-CI (GitHub Actions) uruchamia `go build`, `go test -race` i `go vet` przy każdym pushu.
+GitHub Actions runs `go build`, `go test -race`, and `go vet` on every push.
 
 ---
 
-## Znane ograniczenia
+## Known limitations
 
-- **SubChunk v8/v9 only** — starsze formaty (pre-1.2) nie są obsługiwane.
-- **3D biomy (1.18+)** — nowy format biom (`BiomeState` tag) nie jest jeszcze w pełni dekodowany; zapisywana jest 2D reprezentacja gdy dostępna.
-- **LevelDB lock** — parser nie może otworzyć świata aktywnie używanego przez serwer/grę bez flagi `--copy-first`.
+- **SubChunk v8/v9 only** — legacy formats (pre-1.2) are not supported.
+- **3D biomes (1.18+)** — the new `BiomeState` tag format is not yet fully decoded; a 2D fallback is used when available.
+- **LevelDB lock** — the parser cannot open a world held open by a running server or game without `--copy-first`.
 
 ---
 
-## Zależności
+## Dependencies
 
-| Pakiet | Rola |
+| Package | Role |
 |---|---|
-| `github.com/df-mc/goleveldb` | LevelDB z obsługą kompresji Zlib/LZ4 (wymaganej przez Bedrock) |
-| `modernc.org/sqlite` | SQLite pure-Go (bez CGo) |
+| `github.com/df-mc/goleveldb` | LevelDB with Zlib/LZ4 support required by Bedrock |
+| `modernc.org/sqlite` | Pure-Go SQLite (no CGo) |
 | `github.com/spf13/cobra` | CLI |
