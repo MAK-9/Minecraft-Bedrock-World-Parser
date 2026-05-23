@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+export CGO_ENABLED=0
 
 echo "==> Generating fixtures..."
 go run testdata/generate_fixtures.go
