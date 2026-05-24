@@ -71,6 +71,32 @@ func nbtStringField(s string) nbtField {
 	return nbtField{tagType: 0x08, data: b}
 }
 
+func nbtByteField(v int8) nbtField {
+	return nbtField{tagType: 0x01, data: []byte{byte(v)}}
+}
+
+func nbtInt16Field(v int16) nbtField {
+	b := make([]byte, 2)
+	binary.LittleEndian.PutUint16(b, uint16(v))
+	return nbtField{tagType: 0x02, data: b}
+}
+
+// nbtListField encodes a TAG_List (0x09) whose elements are compound payloads.
+// Each entry in items must be a raw map payload — the fields + TAG_End with NO
+// leading tag byte and NO name prefix (i.e. strip the first 3 bytes that
+// buildNBTCompound prepends: 0x0A tag + 2-byte empty name).
+func nbtListField(elemTagType byte, items [][]byte) nbtField {
+	var buf bytes.Buffer
+	buf.WriteByte(elemTagType)
+	count := make([]byte, 4)
+	binary.LittleEndian.PutUint32(count, uint32(len(items)))
+	buf.Write(count)
+	for _, payload := range items {
+		buf.Write(payload)
+	}
+	return nbtField{tagType: 0x09, data: buf.Bytes()}
+}
+
 func writeUint16LE(buf *bytes.Buffer, v uint16) {
 	b := make([]byte, 2)
 	binary.LittleEndian.PutUint16(b, v)
