@@ -20,9 +20,15 @@ func minimalWorldPath(t *testing.T) string {
 }
 
 func TestExport_Integration(t *testing.T) {
-	worldPath := minimalWorldPath(t)
-	if _, err := os.Stat(worldPath); os.IsNotExist(err) {
+	fixturePath := minimalWorldPath(t)
+	if _, err := os.Stat(fixturePath); os.IsNotExist(err) {
 		t.Skip("testdata/fixtures/minimal_world not found — run: go run testdata/generate_fixtures.go")
+	}
+
+	// Copy the fixture to a temp dir so the test never modifies the committed files.
+	worldPath := filepath.Join(t.TempDir(), "minimal_world")
+	if err := world.CopyWorld(fixturePath, worldPath); err != nil {
+		t.Fatalf("copying fixture: %v", err)
 	}
 
 	wr, err := world.Open(worldPath)
